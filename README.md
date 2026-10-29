@@ -14,7 +14,7 @@ Use **Test notification** to check your setup. Desktop notifications require per
 2. Copy a GitHub repo link — `https://github.com/s4gelol/priorityDms`.
 3. Inside your terminal, run this
 ```sh
-git clone https://github.com/CatLocky/priorityDms
+git clone https://github.com/s4gelol/priorityDms
 ```
 
 ## Updates
