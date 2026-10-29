@@ -1,3 +1,9 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import "./style.css";
 
 import { NavContextMenuPatchCallback } from "@api/ContextMenu";
@@ -13,12 +19,12 @@ import { matchesSearch, shouldDeliver } from "./policy";
 
 const logger = new Logger("PriorityDMs");
 const settings = definePluginSettings({
-    people: { type: OptionType.CUSTOM, default: {} as Record<string, string[]>, description: "Allowed people, saved separately for each Discord account." },
-    popup: { type: OptionType.BOOLEAN, default: true, description: "Show a notification for allowed DMs during Do Not Disturb." },
-    sound: { type: OptionType.BOOLEAN, default: true, description: "Play a soft two-note chime for allowed DMs during Do Not Disturb." },
-    volume: { type: OptionType.SLIDER, default: 50, description: "Chime volume", markers: [0, 25, 50, 75, 100], stickToMarkers: false },
-    preview: { type: OptionType.BOOLEAN, default: false, description: "Include message text in notifications. Off keeps message contents private." },
-    respectStreamer: { type: OptionType.BOOLEAN, default: true, description: "Respect Streamer Mode's notification and sound suppression." }
+    people: { type: OptionType.CUSTOM, default: {} as Record<string, string[]>, description: "Allowed users for each account." },
+    popup: { type: OptionType.BOOLEAN, displayName: "Notifications", default: true, description: "Show notifications for allowed users during DND." },
+    sound: { type: OptionType.BOOLEAN, default: true, description: "Play a sound for allowed users during DND." },
+    volume: { type: OptionType.SLIDER, default: 50, description: "Notification sound volume.", markers: [0, 25, 50, 75, 100], stickToMarkers: false },
+    preview: { type: OptionType.BOOLEAN, displayName: "Message preview", default: false, description: "Show message text in notifications." },
+    respectStreamer: { type: OptionType.BOOLEAN, displayName: "Streamer Mode", default: true, description: "Follow Streamer Mode's notification settings." }
 });
 
 const accountId = () => UserStore.getCurrentUser()?.id ?? "";
@@ -88,60 +94,54 @@ function FriendPicker() {
         const ids = [...new Set([...RelationshipStore.getFriendIDs(), ...allowedIds()])];
         return ids.map(id => ({ id, user: UserStore.getUser(id), nickname: RelationshipStore.getNickname(id) ?? "", friend: RelationshipStore.isFriend(id) }));
     });
-    const dnd = useStateFromStores([UserStore, PresenceStore], () => PresenceStore.getStatus(accountId()) === "dnd");
     const allowed = new Set(allowedIds());
     const rows = users.filter(({ id, user, nickname, friend }) => (tab === "allowed" ? allowed.has(id) : friend)
         && matchesSearch(query, nickname, user?.globalName ?? "", user?.username ?? "", id))
         .sort((a, b) => (a.nickname || a.user?.globalName || a.user?.username || a.id).localeCompare(b.nickname || b.user?.globalName || b.user?.username || b.id));
     return <section className="pd-panel" aria-label="Priority DM settings">
-        <div className="pd-hero"><span className="pd-eyebrow">YOUR QUIET CIRCLE</span>
-            <h2>Quiet for everyone.<br />Available for your people.</h2>
-            <p>Choose whose direct messages can break through Do Not Disturb.</p>
-            <div className="pd-pills"><span>{dnd ? "● DND is on" : "○ Waiting for DND"}</span><span>{allowed.size} allowed</span></div>
+        <h3 className="pd-heading">Allowed users</h3>
+        <p className="pd-description">Select friends to receive their messages while DND is on.</p>
+        <div className="pd-tabs" role="group" aria-label="People list">
+            <button type="button" aria-pressed={tab === "friends"} onClick={() => setTab("friends")}>Friends</button>
+            <button type="button" aria-pressed={tab === "allowed"} onClick={() => setTab("allowed")}>Allowed ({allowed.size})</button>
         </div>
-        <div className="pd-tools">
-            <div className="pd-tabs" role="group" aria-label="People list">
-                <button type="button" aria-pressed={tab === "friends"} onClick={() => setTab("friends")}>Find friends</button>
-                <button type="button" aria-pressed={tab === "allowed"} onClick={() => setTab("allowed")}>Allowed · {allowed.size}</button>
-            </div>
-            <label className="pd-label" htmlFor="pd-search">Search your friends</label>
-            <input id="pd-search" className="pd-search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name, username, or friend nickname…" autoComplete="off" />
-            <div className="pd-list" aria-label="Matching people">
-                {rows.length === 0 && <div className="pd-empty">{query ? "No matches. Try another name." : tab === "allowed" ? "Your circle starts here. Find a friend and select Allow." : "No friends to show yet."}</div>}
-                {rows.map(({ id, user, nickname }) => <div className="pd-row" key={id}>
-                    {user ? <img className="pd-avatar" src={user.getAvatarURL(undefined, 64, false)} alt="" /> : <span className="pd-avatar pd-fallback">?</span>}
-                    <div className="pd-person"><strong>{nickname || user?.globalName || user?.username || "Unknown user"}</strong><span>{user ? `@${user.username}` : id}</span></div>
-                    <Button size="small" variant={allowed.has(id) ? "secondary" : "primary"} aria-label={`${allowed.has(id) ? "Remove" : "Allow"} ${user?.username ?? id}`} onClick={() => {
-                        setAllowed(id, !allowed.has(id));
-                        setFeedback(allowed.has(id) ? "Removed from your quiet circle." : "Added to your quiet circle. Saved automatically.");
-                    }}>{allowed.has(id) ? "Remove" : "+ Allow"}</Button>
-                </div>)}
-            </div>
-            <p className="pd-hint">Saved automatically for this account. You can also right-click a user to allow or remove them.</p>
-            <div className="pd-actions"><Button size="small" variant="secondary" onClick={() => {
-                if (settings.store.popup) popup("Priority DMs · Test", "This is how an allowed DM will reach you.");
-                void chime();
-                setFeedback(settings.store.popup || settings.store.sound ? "Test sent with your popup and sound settings. OS Focus / Do Not Disturb can still silence desktop banners." : "Popups and sound are both off. Enable one below to test it.");
-            }}>Test notification</Button>
-                {permission === "default" && <Button size="small" variant="secondary" onClick={async () => {
-                    try { setPermission(await Notification.requestPermission()); }
-                    catch { setFeedback("Desktop permission could not be requested. In-app notifications are still available."); }
-                }}>Enable desktop banners</Button>}
-            </div>
-            {permission === "denied" && <p className="pd-hint">Desktop banners are blocked. Enable them in your browser or system settings; in-app notifications still work.</p>}
-            <p className="pd-feedback" role="status">{feedback}</p>
+        <label className="pd-label" htmlFor="pd-search">Search friends</label>
+        <input id="pd-search" className="pd-search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Name, username, or nickname" autoComplete="off" />
+        <div className="pd-list" aria-label="Matching people">
+            {rows.length === 0 && <div className="pd-empty">{query ? "No users found." : tab === "allowed" ? "No allowed users. Add someone from Friends." : "No friends found."}</div>}
+            {rows.map(({ id, user, nickname }) => <div className="pd-row" key={id}>
+                {user ? <img className="pd-avatar" src={user.getAvatarURL(undefined, 64, false)} alt="" /> : <span className="pd-avatar pd-fallback">?</span>}
+                <div className="pd-person"><strong>{nickname || user?.globalName || user?.username || "Unknown user"}</strong><span>{user ? `@${user.username}` : id}</span></div>
+                <Button size="small" variant={allowed.has(id) ? "secondary" : "primary"} aria-label={`${allowed.has(id) ? "Remove" : "Allow"} ${user?.username ?? id}`} onClick={() => {
+                    setAllowed(id, !allowed.has(id));
+                    setFeedback(allowed.has(id) ? "User removed." : "User added.");
+                }}>{allowed.has(id) ? "Remove" : "Allow"}</Button>
+            </div>)}
         </div>
+        <p className="pd-hint">Changes save automatically. You can also add users from their right-click menu.</p>
+        <div className="pd-actions"><Button size="small" variant="secondary" onClick={() => {
+            if (settings.store.popup) popup("PriorityDMs", "Test notification.");
+            void chime();
+            setFeedback(settings.store.popup || settings.store.sound ? "Test sent." : "Enable notifications or sound to run the test.");
+        }}>Test notification</Button>
+            {permission === "default" && <Button size="small" variant="secondary" onClick={async () => {
+                try { setPermission(await Notification.requestPermission()); }
+                catch { setFeedback("Couldn't request permission. In-app notifications still work."); }
+            }}>Enable desktop notifications</Button>}
+        </div>
+        {permission === "denied" && <p className="pd-hint">Desktop notifications are blocked. In-app notifications still work.</p>}
+        <p className="pd-feedback" role="status">{feedback}</p>
     </section>;
 }
 
 const userMenu: NavContextMenuPatchCallback = (children, { user }: { user?: User; }) => {
     if (!user || user.id === accountId() || RelationshipStore.isBlockedOrIgnored(user.id)) return;
-    children.push(<Menu.MenuItem id="priority-dms-allow" label={allowedIds().includes(user.id) ? "Remove from DND allowed people" : "Allow DMs during DND"} action={() => setAllowed(user.id, !allowedIds().includes(user.id))} />);
+    children.push(<Menu.MenuItem id="priority-dms-allow" label={allowedIds().includes(user.id) ? "Remove DND exception" : "Allow DMs during DND"} action={() => setAllowed(user.id, !allowedIds().includes(user.id))} />);
 };
 
 export default definePlugin({
     name: "PriorityDMs",
-    description: "Keep Do Not Disturb on and let your chosen people through. Includes a searchable friends picker.",
+    description: "Receive DM notifications from selected users during Do Not Disturb.",
     authors: [{ name: "s4ge.lol", id: 1072867100957347840n }],
     tags: ["Notifications", "Friends"],
     settings,
